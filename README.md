@@ -5,7 +5,7 @@ Parallel reinforcement learning implementation for Pac-Man in Haskell.
 ## Project Structure
 
 ```
-pacman-qlearning/
+pacman/
 ├── app/
 │   └── Main.hs              # Entry point with CLI
 ├── src/
@@ -35,36 +35,36 @@ stack build
 Watch Pac-Man move randomly with visual feedback:
 
 ```bash
-stack exec pacman-qlearning-exe -- --demo --visualize
+stack exec pacman-exe -- --demo --visualize
 ```
 
 Or using short flags:
 ```bash
-stack exec pacman-qlearning-exe -- --demo -v
+stack exec pacman-exe -- --demo -v
 ```
 
 ### Training Mode
 
 **Sequential (1 core):**
 ```bash
-stack exec pacman-qlearning-exe -- --train --cores 1 --episodes 1000
+stack exec pacman-exe -- --train --cores 1 --episodes 1000
 ```
 
 **Parallel (8 cores):**
 ```bash
-stack exec pacman-qlearning-exe -- --train --cores 8 --episodes 1000 +RTS -N8
+stack exec pacman-exe -- --train --cores 8 --episodes 1000 +RTS -N8
 ```
 
 **With visualization of final learned policy:**
 ```bash
-stack exec pacman-qlearning-exe -- --train -c 4 -e 500 -v +RTS -N4
+stack exec pacman-exe -- --train -c 4 -e 500 -v +RTS -N4
 ```
 
 ### Test Mode
 
 Test a trained policy with visualization:
 ```bash
-stack exec pacman-qlearning-exe -- --test --visualize
+stack exec pacman-exe -- --test --visualize
 ```
 
 ## Command Line Options
@@ -115,22 +115,22 @@ When visualization is enabled (`--visualize` or `-v`):
 
 1. **Quick demo to see the game:**
    ```bash
-   stack exec pacman-qlearning-exe -- --demo -v
+   stack exec pacman-exe -- --demo -v
    ```
 
 2. **Train on 4 cores for 2000 episodes:**
    ```bash
-   stack exec pacman-qlearning-exe -- --train -c 4 -e 2000 +RTS -N4
+   stack exec pacman-exe -- --train -c 4 -e 2000 +RTS -N4
    ```
 
 3. **Train and visualize the learned policy:**
    ```bash
-   stack exec pacman-qlearning-exe -- --train -c 2 -e 1000 -v +RTS -N2
+   stack exec pacman-exe -- --train -c 2 -e 1000 -v +RTS -N2
    ```
 
 4. **Use a custom grid:**
    ```bash
-   stack exec pacman-qlearning-exe -- --demo -v -g grids/custom.txt
+   stack exec pacman-exe -- --demo -v -g grids/custom.txt
    ```
 
 ## Testing
@@ -145,16 +145,16 @@ To benchmark parallel speedup, run with different core counts:
 
 ```bash
 # 1 core
-stack exec pacman-qlearning-exe -- --train -c 1 -e 5000
+stack exec pacman-exe -- --train -c 1 -e 5000
 
 # 2 cores
-stack exec pacman-qlearning-exe -- --train -c 2 -e 5000 +RTS -N2
+stack exec pacman-exe -- --train -c 2 -e 5000 +RTS -N2
 
 # 4 cores
-stack exec pacman-qlearning-exe -- --train -c 4 -e 5000 +RTS -N4
+stack exec pacman-exe -- --train -c 4 -e 5000 +RTS -N4
 
 # 8 cores
-stack exec pacman-qlearning-exe -- --train -c 8 -e 5000 +RTS -N8
+stack exec pacman-exe -- --train -c 8 -e 5000 +RTS -N8
 ```
 
 Compare the "Training completed in X seconds" output to calculate speedup.
