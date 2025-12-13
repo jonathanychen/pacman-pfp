@@ -1,10 +1,9 @@
-name:                pacman-pfp
+name:                pacman
 version:             0.1.0.0
-github:              "githubuser/pacman-pfp"
+github:              "jonathanychen/pacman-pfp"
 license:             BSD-3-Clause
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2025 Author name here"
+author:              "Jonathan Chen, Kevin Wang"
+maintainer:          "jyc2183@columbia.edu, kjw2169@columbia.edu"
 
 extra-source-files:
 - README.md
@@ -17,11 +16,17 @@ extra-source-files:
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/githubuser/pacman-pfp#readme>
+description:         Please see the README on GitHub at <https://github.com/githubuser/pacman#readme>
 
 dependencies:
 - base >= 4.7 && < 5
-- gloss >= 1.13
+- containers
+- random
+- parallel
+- deepseq
+- vector
+- mtl
+- gloss
 
 ghc-options:
 - -Wall
@@ -33,12 +38,16 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
+- -O2
+- -threaded
+- -rtsopts
+- -with-rtsopts=-N
 
 library:
   source-dirs: src
 
 executables:
-  pacman-pfp-exe:
+  pacman-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -46,10 +55,10 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - pacman-pfp
+    - pacman
 
 tests:
-  pacman-pfp-test:
+  pacman-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
@@ -57,4 +66,5 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - pacman-pfp
+    - pacman
+    - hspec

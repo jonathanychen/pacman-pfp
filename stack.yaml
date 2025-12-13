@@ -8,7 +8,7 @@
 # A snapshot resolver dictates the compiler version and the set of packages
 # to be used for project dependencies. For example:
 #
-# snapshot: lts-23.24
+snapshot: lts-22.33
 # snapshot: nightly-2025-06-15
 # snapshot: ghc-9.8.4
 #
@@ -17,8 +17,8 @@
 #
 # snapshot: ./custom-snapshot.yaml
 # snapshot: https://example.com/snapshots/2024-01-01.yaml
-snapshot:
-  url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/24/23.yaml
+# snapshot:
+#   url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/24/23.yaml
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
