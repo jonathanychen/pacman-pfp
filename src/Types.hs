@@ -17,13 +17,16 @@ import Control.DeepSeq
 import GHC.Generics (Generic)
 import System.Random
 
+-- Grid cell types
 data Cell = Wall | Empty | Pellet
     deriving (Eq, Show, Generic)
 
 instance NFData Cell
 
+-- Position on the grid
 type Position = (Int, Int)
 
+-- Direction/Action
 data Action = MoveUp | MoveDown | MoveLeft | MoveRight
     deriving (Eq, Ord, Show, Enum, Bounded, Generic)
 
@@ -38,6 +41,7 @@ instance Random Action where
 allActions :: [Action]
 allActions = [minBound .. maxBound]
 
+-- Game state
 data GameState = GameState
     { grid :: Vector (Vector Cell)
     , pacmanPos :: Position
@@ -45,11 +49,12 @@ data GameState = GameState
     , score :: Int
     , pelletsRemaining :: Int
     , isTerminal :: Bool
-    , deathPos :: Maybe Position
+    , deathPos :: Maybe Position  -- NEW: Position where Pac-Man died
     } deriving (Eq, Show, Generic)
 
 instance NFData GameState
 
+-- Q-Learning parameters
 data QLearningParams = QLearningParams
     { alpha :: Double      -- Learning rate
     , gamma :: Double      -- Discount factor
@@ -57,7 +62,9 @@ data QLearningParams = QLearningParams
     , episodes :: Int      -- Number of training episodes
     } deriving (Show)
 
+-- Q-table: Map from (State, Action) to Q-value
 type QTable = Map.Map (StateKey, Action) Double
 
-
+-- Simplified state representation for Q-table
+-- (You'll need to simplify the full state for the key)
 type StateKey = (Position, [Position], Int)  -- Pacman pos, ghost positions, pellets left

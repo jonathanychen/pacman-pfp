@@ -78,7 +78,7 @@ parseArgs (unknown:rest) cfg = do
     printf "Warning: Unknown argument '%s'\n" unknown
     parseArgs rest cfg
 
--- Demo mode: random actions with visualization
+-- Run demo mode (random actions with visualization)
 runDemo :: GameState -> Config -> IO ()
 runDemo initialState config = do
     printf "Running demo with random actions...\n\n"
@@ -87,6 +87,7 @@ runDemo initialState config = do
     gen <- newStdGen
     let actions = take 100 $ randoms gen  -- 100 random actions
     
+    -- Run game with visualization
     if useGloss config
         then do
             printf "Starting Gloss visualization...\n"
@@ -98,6 +99,7 @@ runDemo initialState config = do
             printf "Pellets Remaining: %d\n" (pelletsRemaining finalState)
             printf "Terminal: %s\n" (if isTerminal finalState then "Yes" else "No")
 
+-- Run training mode
 runTraining :: GameState -> Config -> IO ()
 runTraining initialState config = do
     let params = QLearningParams
@@ -122,10 +124,12 @@ runTraining initialState config = do
     printf "Training completed in %.2f seconds\n" (diff :: Double)
     printf "Q-table size: %d entries\n" (Map.size qtable)
     
+    -- Optionally visualize learned policy
     when (visualize config) $ do
         printf "\nVisualizing learned policy...\n"
         visualizePolicy initialState qtable config
 
+-- Run testing mode (test learned policy)
 runTesting :: GameState -> Config -> IO ()
 runTesting initialState config = do
     printf "Testing mode - you need to provide a trained Q-table\n"
@@ -134,7 +138,7 @@ runTesting initialState config = do
     let params = QLearningParams
             { alpha = 0.1
             , gamma = 0.9
-            , epsilon = 0.05
+            , epsilon = 0.05  -- Lower epsilon for testing
             , episodes = min 500 (episodeCount config)
             }
     
@@ -144,12 +148,14 @@ runTesting initialState config = do
     printf "Testing learned policy...\n"
     visualizePolicy initialState qtable config
 
+-- Visualize the learned policy
 visualizePolicy :: GameState -> QTable -> Config -> IO ()
 visualizePolicy initialState qtable config = do
     let maxSteps = 200
     
     if useGloss config
         then do
+            -- Generate actions from policy
             let actions = generatePolicyActions initialState qtable maxSteps
             printf "Starting Gloss visualization with learned policy...\n"
             runGlossGame initialState actions
@@ -160,6 +166,7 @@ visualizePolicy initialState qtable config = do
             printf "Pellets Remaining: %d\n" (pelletsRemaining finalState)
             printf "Terminal: %s\n" (if isTerminal finalState then "Yes" else "No")
 
+-- Generate actions from policy
 generatePolicyActions :: GameState -> QTable -> Int -> [Action]
 generatePolicyActions initialState qtable maxSteps = go initialState 0
     where
@@ -172,6 +179,7 @@ generatePolicyActions initialState qtable maxSteps = go initialState 0
                     (newState, _) = executeAction state action
                 in action : go newState (step + 1)
 
+-- Run the learned policy
 runPolicyWithVisualization :: GameState -> QTable -> Int -> Bool -> IO GameState
 runPolicyWithVisualization initialState qtable maxSteps visualize = 
     go initialState (0 :: Int)
@@ -183,7 +191,7 @@ runPolicyWithVisualization initialState qtable maxSteps visualize =
             | isTerminal state = do
                 when visualize $ do
                     renderDeathScreen state
-                    threadDelay 2000000
+                    threadDelay 2000000  -- 2 second pause on death screen
                 return state
             | otherwise = do
                 let s = stateKey state
@@ -192,7 +200,7 @@ runPolicyWithVisualization initialState qtable maxSteps visualize =
                 when visualize $ do
                     renderGame state
                     printf "Step %d: Best Action = %s\n" step (show action)
-                    threadDelay 500000
+                    threadDelay 500000  -- 500ms delay
                 
                 let (newState, reward) = executeAction state action
                 
@@ -201,7 +209,7 @@ runPolicyWithVisualization initialState qtable maxSteps visualize =
                 
                 go newState (step + 1)
 
--- Testing without a file
+-- Create a simple test game (for testing without a file)
 createTestGame :: GameState
 createTestGame = 
     let gridData = 
@@ -215,8 +223,8 @@ createTestGame =
             , [Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall]
             ]
         gridVec = V.fromList $ map V.fromList gridData
-        pacPos = (3, 6)
-        ghosts = [(3, 1), (7, 3), (2, 5), (8, 5)]
+        pacPos = (3, 6)  -- Bottom middle area
+        ghosts = [(3, 1), (7, 3), (2, 5), (8, 5)]  -- Four ghost positions
         pelletCount = sum [length [() | cell <- row, cell == Pellet] | row <- gridData]
     in GameState
         { grid = gridVec
@@ -228,5 +236,6 @@ createTestGame =
         , deathPos = Nothing
         }
 
+-- Helper for thread delay
 threadDelay :: Int -> IO ()
 threadDelay = Control.Concurrent.threadDelay
