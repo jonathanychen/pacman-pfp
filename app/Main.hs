@@ -13,6 +13,7 @@ import Text.Printf
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Control.Concurrent
+import Control.DeepSeq (deepseq)
 
 data RunMode = Train | Test | Demo
     deriving (Eq, Show)
@@ -40,7 +41,7 @@ main :: IO ()
 main = do
     args <- getArgs
     config <- parseArgs args defaultConfig
-    
+
     printf "Pac-Man Q-Learning\n"
     printf "==================\n"
     printf "Configuration:\n"
@@ -50,10 +51,10 @@ main = do
     printf "  Use Gloss: %s\n" (show $ useGloss config)
     printf "  Grid file: %s\n" (gridFile config)
     printf "  Episodes: %d\n\n" (episodeCount config)
-    
+
     -- Load game state
     initialState <- loadGrid (gridFile config)
-    
+
     case runMode config of
         Demo -> runDemo initialState config
         Train -> runTraining initialState config
@@ -82,11 +83,11 @@ parseArgs (unknown:rest) cfg = do
 runDemo :: GameState -> Config -> IO ()
 runDemo initialState config = do
     printf "Running demo with random actions...\n\n"
-    
+
     -- Generate random actions
     gen <- newStdGen
     let actions = take 100 $ randoms gen  -- 100 random actions
-    
+
     -- Run game with visualization
     if useGloss config
         then do
@@ -108,22 +109,21 @@ runTraining initialState config = do
             , epsilon = 0.1
             , episodes = episodeCount config
             }
-    
-    printf "Training Q-Learning with %d cores for %d episodes...\n" 
+
+    printf "Training Q-Learning with %d cores for %d episodes...\n"
         (numCores config) (episodes params)
-    
+
     start <- getCPUTime
     qtable <- if numCores config == 1
                 then do
-                    seed <- randomIO
-                    return $ evalState (trainSequential initialState params) (mkStdGen seed)
+                    evalState (trainSequential initialState params) . mkStdGen <$> randomIO
                 else trainParallel (numCores config) initialState params
-    end <- getCPUTime
-    
+    end <- qtable `deepseq` getCPUTime
+
     let diff = fromIntegral (end - start) / (10^12)
     printf "Training completed in %.2f seconds\n" (diff :: Double)
     printf "Q-table size: %d entries\n" (Map.size qtable)
-    
+
     -- Optionally visualize learned policy
     when (visualize config) $ do
         printf "\nVisualizing learned policy...\n"
@@ -134,17 +134,17 @@ runTesting :: GameState -> Config -> IO ()
 runTesting initialState config = do
     printf "Testing mode - you need to provide a trained Q-table\n"
     printf "For now, training a quick model...\n\n"
-    
+
     let params = QLearningParams
             { alpha = 0.1
             , gamma = 0.9
             , epsilon = 0.05  -- Lower epsilon for testing
             , episodes = min 500 (episodeCount config)
             }
-    
+
     seed <- randomIO
     let qtable = evalState (trainSequential initialState params) (mkStdGen seed)
-    
+
     printf "Testing learned policy...\n"
     visualizePolicy initialState qtable config
 
@@ -152,7 +152,7 @@ runTesting initialState config = do
 visualizePolicy :: GameState -> QTable -> Config -> IO ()
 visualizePolicy initialState qtable config = do
     let maxSteps = 200
-    
+
     if useGloss config
         then do
             -- Generate actions from policy
@@ -175,13 +175,13 @@ generatePolicyActions initialState qtable maxSteps = go initialState 0
             | isTerminal state = []
             | otherwise =
                 let s = stateKey state
-                    action = bestAction qtable s
+                    action = bestAction state qtable s
                     (newState, _) = executeAction state action
                 in action : go newState (step + 1)
 
 -- Run the learned policy
 runPolicyWithVisualization :: GameState -> QTable -> Int -> Bool -> IO GameState
-runPolicyWithVisualization initialState qtable maxSteps visualize = 
+runPolicyWithVisualization initialState qtable maxSteps visualize =
     go initialState (0 :: Int)
     where
         go state step
@@ -195,24 +195,24 @@ runPolicyWithVisualization initialState qtable maxSteps visualize =
                 return state
             | otherwise = do
                 let s = stateKey state
-                    action = bestAction qtable s
-                
+                    action = bestAction state qtable s
+
                 when visualize $ do
                     renderGame state
                     printf "Step %d: Best Action = %s\n" step (show action)
                     threadDelay 500000  -- 500ms delay
-                
+
                 let (newState, reward) = executeAction state action
-                
-                when visualize $ 
+
+                when visualize $
                     printf "Reward: %.2f\n" reward
-                
+
                 go newState (step + 1)
 
 -- Create a simple test game (for testing without a file)
 createTestGame :: GameState
-createTestGame = 
-    let gridData = 
+createTestGame =
+    let gridData =
             [ [Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall]
             , [Wall, Pellet, Pellet, Empty, Pellet, Pellet, Pellet, Pellet, Pellet, Wall]
             , [Wall, Wall, Wall, Pellet, Pellet, Pellet, Pellet, Pellet, Pellet, Wall]

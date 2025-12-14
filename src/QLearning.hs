@@ -15,19 +15,18 @@ import GameExecution (executeAction)  -- Import executeAction from GameExecution
 import qualified Data.Map.Strict as Map
 import System.Random
 import Control.Monad.State
-import Control.DeepSeq
 import Data.Vector ((!))
 
-ghostInDirection :: GameState -> Action -> Bool
-ghostInDirection gs action =
+ghostInDirectionWithinNTiles :: GameState -> Action -> Int -> Bool
+ghostInDirectionWithinNTiles gs action n =
     let (x, y) = pacmanPos gs
         ghostPosSet = ghostPositions gs
         targetPos = case action of
-            MoveUp    -> (x, y - 1)
-            MoveDown  -> (x, y + 1)
-            MoveLeft  -> (x - 1, y)
-            MoveRight -> (x + 1, y)
-    in targetPos `elem` ghostPosSet
+            MoveUp    -> [(x, y - i) | i <- [1..n]]
+            MoveDown  -> [(x, y + i) | i <- [1..n]]
+            MoveLeft  -> [(x - i, y) | i <- [1..n]]
+            MoveRight -> [(x + i, y) | i <- [1..n]]
+    in any (`elem` ghostPosSet) targetPos
 
 cellInDirection :: GameState -> Action -> Cell -> Bool
 cellInDirection gs action cellType =
@@ -56,10 +55,10 @@ stateKey gs = StateKey {
     pelletRight = pelletInDirection gs MoveRight,
     pelletUp = pelletInDirection gs MoveUp,
     pelletDown = pelletInDirection gs MoveDown,
-    ghostLeft = ghostInDirection gs MoveLeft,
-    ghostRight = ghostInDirection gs MoveRight,
-    ghostUp = ghostInDirection gs MoveUp,
-    ghostDown = ghostInDirection gs MoveDown,
+    ghostLeft = ghostInDirectionWithinNTiles gs MoveLeft 3,
+    ghostRight = ghostInDirectionWithinNTiles gs MoveRight 3,
+    ghostUp = ghostInDirectionWithinNTiles gs MoveUp 3,
+    ghostDown = ghostInDirectionWithinNTiles gs MoveDown 3,
     wallLeft = wallInDirection gs MoveLeft,
     wallRight = wallInDirection gs MoveRight,
     wallUp = wallInDirection gs MoveUp,
@@ -82,12 +81,12 @@ chooseAction gs qtable s eps = do
             idx <- state $ randomR (0, length (legalActions gs) - 1)
             return $ legalActions gs !! idx
         else do  -- Exploit: best action
-            return $ bestAction qtable s
+            return $ bestAction gs qtable s
 
 -- Find best action for a state
-bestAction :: QTable -> StateKey -> Action
-bestAction qtable s =
-    let qValues = [(a, getQValue qtable s a) | a <- allActions]
+bestAction :: GameState -> QTable -> StateKey -> Action
+bestAction gs qtable s =
+    let qValues = [(a, getQValue qtable s a) | a <- legalActions gs]
     in fst $ foldr1 (\x y -> if snd x > snd y then x else y) qValues
 
 -- Update Q-value
