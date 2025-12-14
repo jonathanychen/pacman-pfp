@@ -27,6 +27,7 @@ dependencies:
 - vector
 - mtl
 - gloss
+- time
 
 ghc-options:
 - -Wall
