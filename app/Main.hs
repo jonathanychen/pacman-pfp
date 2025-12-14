@@ -9,6 +9,7 @@ import System.Environment (getArgs)
 import System.Random
 import Control.Monad.State
 import System.CPUTime
+import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime)
 import Text.Printf
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
@@ -113,15 +114,19 @@ runTraining initialState config = do
     printf "Training Q-Learning with %d cores for %d episodes...\n"
         (numCores config) (episodes params)
 
-    start <- getCPUTime
+    startRealTime <- getCurrentTime
+    startCPUTime <- getCPUTime
     qtable <- if numCores config == 1
                 then do
                     evalState (trainSequential initialState params) . mkStdGen <$> randomIO
                 else trainParallel (numCores config) initialState params
-    end <- qtable `deepseq` getCPUTime
+    endRealTime <- qtable `deepseq` getCurrentTime
+    endCPUTime <- getCPUTime
 
-    let diff = fromIntegral (end - start) / (10^12)
-    printf "Training completed in %.2f seconds\n" (diff :: Double)
+    let diffReal = realToFrac (diffUTCTime endRealTime startRealTime) :: Double
+        diffCPU = fromIntegral (endCPUTime - startCPUTime) / (10^12)
+    printf "Training completed in %.2f seconds (real time)\n" (diffReal :: Double)
+    printf "Training completed in %.2f seconds (CPU time)\n" (diffCPU :: Double)
     printf "Q-table size: %d entries\n" (Map.size qtable)
 
     -- Optionally visualize learned policy
