@@ -4,7 +4,7 @@ module Game
     , parseGrid
     , clearScreen
     , renderGame
-    , renderDeathScreen  -- Make sure this is exported!
+    , renderDeathScreen
     , visualizeGameStates
     , runGameWithVisualization
     , when
@@ -39,6 +39,7 @@ loadGrid filepath = do
         , pelletsRemaining = pelletCount
         , isTerminal = False
         , deathPos = Nothing
+        , recentPositions = []
         }
 
 -- Parse grid from lines of text
@@ -58,7 +59,7 @@ parseGrid lns = go lns 0 (0, 0) [] 0 []
                 '1' -> parseLine cs y (x + 1) pacPos ghosts pellets (Wall : rowAcc)
                 '0' -> parseLine cs y (x + 1) pacPos ghosts (pellets + 1) (Pellet : rowAcc)
                 'P' -> parseLine cs y (x + 1) (x, y) ghosts pellets (Empty : rowAcc)
-                'G' -> parseLine cs y (x + 1) pacPos ((x, y) : ghosts) (pellets + 1) (Pellet : rowAcc)  -- Changed: Pellet under ghost
+                'G' -> parseLine cs y (x + 1) pacPos ((x, y) : ghosts) pellets (Empty : rowAcc)
                 ' ' -> parseLine cs y (x + 1) pacPos ghosts pellets (Empty : rowAcc)
                 _   -> parseLine cs y (x + 1) pacPos ghosts pellets (Empty : rowAcc)
 
@@ -98,7 +99,6 @@ renderGame state = do
     putStrLn $ replicate 40 '-'
     hFlush stdout
 
--- Render death screen with X at collision point
 renderDeathScreen :: GameState -> IO ()
 renderDeathScreen state = do
     clearScreen
@@ -107,9 +107,9 @@ renderDeathScreen state = do
     
     -- Print header
     printf "\n"
-    printf "╔════════════════════════════════════════╗\n"
-    printf "║              GAME OVER                 ║\n"
-    printf "╚════════════════════════════════════════╝\n"
+    printf "╔═══════════════════════════════════════╗\n"
+    printf "║               GAME OVER                ║\n"
+    printf "╚═══════════════════════════════════════╝\n"
     printf "Score: %d | Pellets: %d\n" 
         (score state) 
         (pelletsRemaining state)
@@ -154,11 +154,7 @@ runGameWithVisualization initialState actions visualize =
     go initialState actions (0 :: Int)
     where
         go state [] _ = return state
-        go state _ _ | isTerminal state = do
-            when visualize $ do
-                renderDeathScreen state
-                threadDelay 2000000  -- 2 second pause on death screen
-            return state
+        go state _ _ | isTerminal state = return state
         go state (action:rest) step = do
             when visualize $ do
                 renderGame state

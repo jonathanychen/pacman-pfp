@@ -1,14 +1,15 @@
 {-# LANGUAGE DeriveGeneric #-}
 
-module Types
+module Types 
     ( Cell(..)
     , Position
     , Action(..)
     , allActions
     , GameState(..)
+    , StateKey(..)
     , QLearningParams(..)
     , QTable
-    , StateKey(..)
+    , StateKey
     ) where
 
 import qualified Data.Map.Strict as Map
@@ -33,10 +34,10 @@ data Action = MoveUp | MoveDown | MoveLeft | MoveRight
 instance NFData Action
 
 instance Random Action where
-    randomR (lo, hi) g =
+    randomR (lo, hi) g = 
         let (i, g') = randomR (fromEnum lo, fromEnum hi) g
         in (toEnum i, g')
-    random = randomR (minBound, maxBound)
+    random g = randomR (minBound, maxBound) g
 
 allActions :: [Action]
 allActions = [minBound .. maxBound]
@@ -49,7 +50,8 @@ data GameState = GameState
     , score :: Int
     , pelletsRemaining :: Int
     , isTerminal :: Bool
-    , deathPos :: Maybe Position  -- NEW: Position where Pac-Man died
+    , deathPos :: Maybe Position
+    , recentPositions :: [Position]
     } deriving (Eq, Show, Generic)
 
 instance NFData GameState
@@ -65,14 +67,22 @@ data QLearningParams = QLearningParams
 -- Q-table: Map from (State, Action) to Q-value
 type QTable = Map.Map (StateKey, Action) Double
 
+-- Improved state representation for Q-Learning (removed exact position for better generalization)
 data StateKey = StateKey
-    {
-    skPacmanPos :: Position -- Pacman position
-    , pelletLeft :: Bool, pelletRight :: Bool, pelletUp :: Bool, pelletDown :: Bool -- Whether a pellet is left, right, up, down
-    , ghostLeft :: Bool, ghostRight :: Bool, ghostUp :: Bool, ghostDown :: Bool -- Whether a ghost is left, right, up, down
-    , wallLeft :: Bool, wallRight :: Bool, wallUp :: Bool, wallDown :: Bool -- Whether a wall is left, right, up, down
-    } deriving  (Eq, Ord, Show, Generic)
+    { pelletLeft :: Bool
+    , pelletRight :: Bool
+    , pelletUp :: Bool
+    , pelletDown :: Bool
+    , ghostLeft :: Bool
+    , ghostRight :: Bool
+    , ghostUp :: Bool
+    , ghostDown :: Bool
+    , wallLeft :: Bool
+    , wallRight :: Bool
+    , wallUp :: Bool
+    , wallDown :: Bool
+    , ghostNear :: Bool  -- Whether any ghost is within 3 steps
+    , pelletNear :: Bool  -- Whether any pellet is within 3 steps
+    } deriving (Eq, Ord, Show, Generic)
 
 instance NFData StateKey
-
--- type StateKey = (Position, [Position], Int)  -- Pacman pos, ghost positions, pellets left
