@@ -33,12 +33,10 @@ executeAction state action =
                 finalState = moveGhosts stateAfterPellet
                 -- Check collision AFTER moving ghosts
                 collisionAfterGhosts = pacmanPos finalState `elem` ghostPositions finalState
-                -- Calculate reward
-                reward = if not validPos
-                         then -1.0  -- Hit wall
-                         else if collisionAfterGhosts
-                         then -100.0  -- Ghost collision
-                         else snd $ getPelletReward stateAfterPellet
+                reward
+                  | not validPos = -1.0
+                  | collisionAfterGhosts = -500.0
+                  | otherwise = snd $ getPelletReward stateAfterMove actualPacPos 
             in if collisionAfterGhosts
                 then (finalState { isTerminal = True, deathPos = Just (pacmanPos finalState) }, reward)
                 else (finalState, reward)
@@ -55,7 +53,7 @@ isValidPosition :: Vector (Vector Cell) -> Position -> Bool
 isValidPosition g (x, y) =
     let rows = V.length g
         cols = if rows > 0 then V.length (g V.! 0) else 0
-    in x >= 0 && x < cols && y >= 0 && y < rows && 
+    in x >= 0 && x < cols && y >= 0 && y < rows &&
         (g V.! y V.! x) /= Wall
 
 -- Check for pellet collection and update state
@@ -64,7 +62,7 @@ checkPelletCollection state =
     let pos = pacmanPos state
         cell = grid state V.! snd pos V.! fst pos
     in case cell of
-        Pellet -> 
+        Pellet ->
             let newGrid = updateGrid (grid state) pos Empty
                 newPellets = pelletsRemaining state - 1
                 newScore = score state + 10
@@ -76,10 +74,9 @@ checkPelletCollection state =
                      }
         _ -> state
 
--- Get reward for pellet collection
-getPelletReward :: GameState -> (GameState, Double)
-getPelletReward state =
-    let pos = pacmanPos state
+getPelletReward :: GameState -> Position -> (GameState, Double)
+getPelletReward state pos =
+    let 
         cell = grid state V.! snd pos V.! fst pos
     in case cell of
         Pellet -> (state, 10.0)
@@ -101,7 +98,7 @@ findPathBFS grid start goal occupiedPositions
                     newParents = foldr (\n -> Map.insert n (Just current)) parents unvisited
                     newQueue = queue ++ unvisited
                 in bfs newQueue newVisited newParents
-        
+
         reconstructPath pos parents =
             case Map.lookup pos parents of
                 Nothing -> [pos]
@@ -135,13 +132,11 @@ moveGhosts state = state { ghostPositions = newPositions }
         pacPos = pacmanPos state
         g = grid state
         oldPositions = ghostPositions state
-        
-        -- Analyze trap targets (escape routes around Pac-Man)
+
         trapTargets = getTrapTargets pacPos g
-        
-        -- Move ghosts with coordination
+
         newPositions = moveGhostsCoordinated oldPositions trapTargets [] 0
-        
+
         moveGhostsCoordinated [] _ acc _ = reverse acc
         moveGhostsCoordinated (gPos:rest) targets acc ghostIndex =
             let occupiedPositions = acc ++ rest
@@ -150,14 +145,12 @@ moveGhosts state = state { ghostPositions = newPositions }
                          then moveGhostChase gPos occupiedPositions
                          else moveGhostTrap gPos targets occupiedPositions
             in moveGhostsCoordinated rest targets (newPos : acc) (ghostIndex + 1)
-        
-        -- Chase mode: use BFS to find shortest path to Pac-Man
+
         moveGhostChase gPos occupiedPositions =
             case findPathBFS g gPos pacPos occupiedPositions of
-                Just path | length path > 1 -> path !! 1  -- Take second position (first is current)
-                _ -> moveGhostSimple gPos occupiedPositions  -- Fallback to simple movement
-        
-        -- Trap mode: move toward closest trap target (escape route)
+                Just path | length path > 1 -> path !! 1
+                _ -> moveGhostSimple gPos occupiedPositions
+
         moveGhostTrap gPos targets occupiedPositions =
             let targetDistances = [(t, manhattan gPos t) | t <- targets]
                 sortedTargets = map fst $ sortBy (comparing snd) targetDistances
@@ -166,16 +159,17 @@ moveGhosts state = state { ghostPositions = newPositions }
                 (target:_) -> case findPathBFS g gPos target occupiedPositions of
                     Just path | length path > 1 -> path !! 1
                     _ -> moveGhostSimple gPos occupiedPositions
-        
-        -- Simple fallback movement (direct approach, no pathfinding)
+
         moveGhostSimple gPos occupiedPositions =
             let possibleMoves = [applyAction gPos a | a <- allActions]
                 validMoves = filter (\p -> isValidPosition g p && p `notElem` occupiedPositions) possibleMoves
                 closerMoves = filter (\p -> manhattan p pacPos < manhattan gPos pacPos) validMoves
-            in if null closerMoves 
+            in if null closerMoves
                 then if null validMoves then gPos else head validMoves
                 else head closerMoves
 
--- Update grid cell
+manhattan :: Position -> Position -> Int
+manhattan (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2)
+
 updateGrid :: Vector (Vector Cell) -> Position -> Cell -> Vector (Vector Cell)
 updateGrid g (x, y) cell = g V.// [(y, (g V.! y) V.// [(x, cell)])]

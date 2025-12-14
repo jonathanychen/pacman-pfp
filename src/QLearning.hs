@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 
-module QLearning 
+module QLearning
     ( stateKey
     , getQValue
     , chooseAction
@@ -16,29 +16,77 @@ import qualified Data.Map.Strict as Map
 import System.Random
 import Control.Monad.State
 import Control.DeepSeq
+import Data.Vector ((!))
+
+ghostInDirection :: GameState -> Action -> Bool
+ghostInDirection gs action =
+    let (x, y) = pacmanPos gs
+        ghostPosSet = ghostPositions gs
+        targetPos = case action of
+            MoveUp    -> (x, y - 1)
+            MoveDown  -> (x, y + 1)
+            MoveLeft  -> (x - 1, y)
+            MoveRight -> (x + 1, y)
+    in targetPos `elem` ghostPosSet
+
+cellInDirection :: GameState -> Action -> Cell -> Bool
+cellInDirection gs action cellType =
+    let (x, y) = pacmanPos gs
+        gridCells = grid gs
+        targetPos = case action of
+            MoveUp    -> (x, y - 1)
+            MoveDown  -> (x, y + 1)
+            MoveLeft  -> (x - 1, y)
+            MoveRight -> (x + 1, y)
+        (tx, ty) = targetPos
+    in (ty >= 0 && ty < length gridCells && tx >= 0 && tx < length (gridCells ! ty)) &&
+       ((gridCells ! ty) ! tx == cellType)
+
+pelletInDirection :: GameState -> Action -> Bool
+pelletInDirection gs action = cellInDirection gs action Pellet
+
+wallInDirection :: GameState -> Action -> Bool
+wallInDirection gs action = cellInDirection gs action Wall
 
 -- Extract state key from full game state
 stateKey :: GameState -> StateKey
-stateKey gs = (pacmanPos gs, ghostPositions gs, pelletsRemaining gs)
+stateKey gs = StateKey {
+    skPacmanPos = pacmanPos gs,
+    pelletLeft = pelletInDirection gs MoveLeft,
+    pelletRight = pelletInDirection gs MoveRight,
+    pelletUp = pelletInDirection gs MoveUp,
+    pelletDown = pelletInDirection gs MoveDown,
+    ghostLeft = ghostInDirection gs MoveLeft,
+    ghostRight = ghostInDirection gs MoveRight,
+    ghostUp = ghostInDirection gs MoveUp,
+    ghostDown = ghostInDirection gs MoveDown,
+    wallLeft = wallInDirection gs MoveLeft,
+    wallRight = wallInDirection gs MoveRight,
+    wallUp = wallInDirection gs MoveUp,
+    wallDown = wallInDirection gs MoveDown
+}
 
 -- Get Q-value for state-action pair
 getQValue :: QTable -> StateKey -> Action -> Double
 getQValue qtable s a = Map.findWithDefault 0.0 (s, a) qtable
 
+legalActions :: GameState -> [Action]
+legalActions gs = filter (not . wallInDirection gs) allActions
+
 -- Choose action using epsilon-greedy policy
-chooseAction :: RandomGen g => QTable -> StateKey -> Double -> State g Action
-chooseAction qtable s eps = do
+chooseAction :: RandomGen g => GameState -> QTable -> StateKey -> Double -> State g Action
+chooseAction gs qtable s eps = do
     r <- state random
     if r < eps
         then do  -- Explore: random action
-            idx <- state $ randomR (0, length allActions - 1)
-            return $ allActions !! idx
+            idx <- state $ randomR (0, length (legalActions gs) - 1)
+            return $ legalActions gs !! idx
         else do  -- Exploit: best action
             return $ bestAction qtable s
 
 -- Find best action for a state
 bestAction :: QTable -> StateKey -> Action
-bestAction qtable s = 
+bestAction qtable s =
     let qValues = [(a, getQValue qtable s a) | a <- allActions]
     in fst $ foldr1 (\x y -> if snd x > snd y then x else y) qValues
 
@@ -58,15 +106,15 @@ runEpisode initialState initialQTable params = go initialState initialQTable
             | isTerminal state = return qtable
             | otherwise = do
                 let s = stateKey state
-                action <- chooseAction qtable s (epsilon params)
-                
+                action <- chooseAction state qtable s (epsilon params)
+
                 -- Execute action and get next state and reward
                 let (nextState, reward) = executeAction state action
                 let s' = stateKey nextState
-                
+
                 -- Update Q-table
                 let newQTable = updateQValue qtable s action reward s' params
-                
+
                 go nextState newQTable
 
 -- Sequential training

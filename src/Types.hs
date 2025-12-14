@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 
-module Types 
+module Types
     ( Cell(..)
     , Position
     , Action(..)
@@ -8,7 +8,7 @@ module Types
     , GameState(..)
     , QLearningParams(..)
     , QTable
-    , StateKey
+    , StateKey(..)
     ) where
 
 import qualified Data.Map.Strict as Map
@@ -33,10 +33,10 @@ data Action = MoveUp | MoveDown | MoveLeft | MoveRight
 instance NFData Action
 
 instance Random Action where
-    randomR (lo, hi) g = 
+    randomR (lo, hi) g =
         let (i, g') = randomR (fromEnum lo, fromEnum hi) g
         in (toEnum i, g')
-    random g = randomR (minBound, maxBound) g
+    random = randomR (minBound, maxBound)
 
 allActions :: [Action]
 allActions = [minBound .. maxBound]
@@ -65,6 +65,20 @@ data QLearningParams = QLearningParams
 -- Q-table: Map from (State, Action) to Q-value
 type QTable = Map.Map (StateKey, Action) Double
 
+<<<<<<< HEAD
 -- Simplified state representation for Q-table
 -- (You'll need to simplify the full state for the key)
 type StateKey = (Position, [Position], Int)  -- Pacman pos, ghost positions, pellets left
+=======
+data StateKey = StateKey
+    {
+    skPacmanPos :: Position -- Pacman position
+    , pelletLeft :: Bool, pelletRight :: Bool, pelletUp :: Bool, pelletDown :: Bool -- Whether a pellet is left, right, up, down
+    , ghostLeft :: Bool, ghostRight :: Bool, ghostUp :: Bool, ghostDown :: Bool -- Whether a ghost is left, right, up, down
+    , wallLeft :: Bool, wallRight :: Bool, wallUp :: Bool, wallDown :: Bool -- Whether a wall is left, right, up, down
+    } deriving  (Eq, Ord, Show, Generic)
+
+instance NFData StateKey
+
+-- type StateKey = (Position, [Position], Int)  -- Pacman pos, ghost positions, pellets left
+>>>>>>> 2b81383 (fix part of rewards system, add new large grid)
