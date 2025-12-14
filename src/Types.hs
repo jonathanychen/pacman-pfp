@@ -65,11 +65,6 @@ data QLearningParams = QLearningParams
 -- Q-table: Map from (State, Action) to Q-value
 type QTable = Map.Map (StateKey, Action) Double
 
-<<<<<<< HEAD
--- Simplified state representation for Q-table
--- (You'll need to simplify the full state for the key)
-type StateKey = (Position, [Position], Int)  -- Pacman pos, ghost positions, pellets left
-=======
 data StateKey = StateKey
     {
     skPacmanPos :: Position -- Pacman position
@@ -81,4 +76,3 @@ data StateKey = StateKey
 instance NFData StateKey
 
 -- type StateKey = (Position, [Position], Int)  -- Pacman pos, ghost positions, pellets left
->>>>>>> 2b81383 (fix part of rewards system, add new large grid)
