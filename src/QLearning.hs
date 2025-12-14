@@ -11,7 +11,7 @@ module QLearning
     ) where
 
 import Types
-import GameExecution (executeAction)  -- Import executeAction from GameExecution module
+import GameExecution (executeAction)
 import qualified Data.Map.Strict as Map
 import System.Random
 import Control.Monad.State
@@ -101,14 +101,14 @@ updateQValue qtable s a reward s' params =
 runEpisode :: RandomGen g => GameState -> QTable -> QLearningParams -> State g QTable
 runEpisode initialState initialQTable params = go initialState initialQTable
     where
-        go state !qtable
-            | isTerminal state = return qtable
+        go gs !qtable
+            | isTerminal gs = return qtable
             | otherwise = do
-                let s = stateKey state
-                action <- chooseAction state qtable s (epsilon params)
+                let s = stateKey gs
+                action <- chooseAction gs qtable s (epsilon params)
 
                 -- Execute action and get next state and reward
-                let (nextState, reward) = executeAction state action
+                let (nextState, reward) = executeAction gs action
                 let s' = stateKey nextState
 
                 -- Update Q-table

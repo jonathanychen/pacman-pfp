@@ -4,7 +4,7 @@ module Game
     , parseGrid
     , clearScreen
     , renderGame
-    , renderDeathScreen  -- Make sure this is exported!
+    , renderDeathScreen
     , visualizeGameStates
     , runGameWithVisualization
     , when
@@ -13,7 +13,6 @@ module Game
 import Types
 import GameExecution
 import qualified Data.Vector as V
-import Data.Vector (Vector)
 import System.IO (hFlush, stdout)
 import Control.Concurrent (threadDelay)
 import Text.Printf
@@ -23,9 +22,6 @@ loadGrid :: FilePath -> IO GameState
 loadGrid filepath = do
     content <- readFile filepath
     let lns = lines content
-        rows = length lns
-        cols = if null lns then 0 else length (head lns)
-        
         -- Parse grid and find special positions
         (gridData, pacPos, ghosts, pelletCount) = parseGrid lns
         
@@ -70,7 +66,6 @@ renderGame :: GameState -> IO ()
 renderGame state = do
     clearScreen
     let g = grid state
-        rows = V.length g
     
     -- Print header
     printf "Score: %d | Pellets: %d | Status: %s\n" 
@@ -103,7 +98,6 @@ renderDeathScreen :: GameState -> IO ()
 renderDeathScreen state = do
     clearScreen
     let g = grid state
-        rows = V.length g
     
     -- Print header
     printf "\n"

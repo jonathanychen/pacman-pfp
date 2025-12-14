@@ -7,10 +7,9 @@ module GameExecution
 import Types
 import qualified Data.Vector as V
 import Data.Vector (Vector)
-import Data.Maybe (isJust, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
-import Data.List (sortBy, minimumBy)
+import Data.List (sortBy)
 import Data.Ord (comparing)
 
 -- Execute an action and return new state and reward
@@ -84,7 +83,7 @@ getPelletReward state pos =
 
 -- BFS pathfinding (simpler and more reliable than A*)
 findPathBFS :: Vector (Vector Cell) -> Position -> Position -> [Position] -> Maybe [Position]
-findPathBFS grid start goal occupiedPositions
+findPathBFS board start goal occupiedPositions
     | start == goal = Just [goal]
     | otherwise = bfs [start] (Set.singleton start) (Map.singleton start Nothing)
     where
@@ -92,11 +91,11 @@ findPathBFS grid start goal occupiedPositions
         bfs (current:queue) visited parents
             | current == goal = Just (reconstructPath current parents)
             | otherwise =
-                let neighbors = getValidNeighbors grid current occupiedPositions
+                let neighbors = getValidNeighbors board current occupiedPositions
                     unvisited = filter (`Set.notMember` visited) neighbors
                     newVisited = foldr Set.insert visited unvisited
                     newParents = foldr (\n -> Map.insert n (Just current)) parents unvisited
-                    newQueue = queue ++ unvisited
+                    newQueue = queue ++ unvisited                    
                 in bfs newQueue newVisited newParents
 
         reconstructPath pos parents =
@@ -107,23 +106,15 @@ findPathBFS grid start goal occupiedPositions
 
 -- Get valid neighboring positions
 getValidNeighbors :: Vector (Vector Cell) -> Position -> [Position] -> [Position]
-getValidNeighbors grid pos occupiedPositions =
+getValidNeighbors board pos occupiedPositions =
     let neighbors = [applyAction pos a | a <- allActions]
-    in filter (\p -> isValidPosition grid p && p `notElem` occupiedPositions) neighbors
-
--- Calculate which cardinal directions are blocked for Pac-Man
-getBlockedDirections :: Position -> [Position] -> Vector (Vector Cell) -> [Action]
-getBlockedDirections pacPos ghostPositions grid =
-    let checkBlocked action =
-            let targetPos = applyAction pacPos action
-            in not (isValidPosition grid targetPos) || targetPos `elem` ghostPositions
-    in filter checkBlocked allActions
+    in filter (\p -> isValidPosition board p && p `notElem` occupiedPositions) neighbors
 
 -- Determine trap target positions (cardinal directions around Pac-Man)
 getTrapTargets :: Position -> Vector (Vector Cell) -> [Position]
-getTrapTargets pacPos grid =
+getTrapTargets pacPos board =
     let targets = [applyAction pacPos a | a <- allActions]
-    in filter (isValidPosition grid) targets
+    in filter (isValidPosition board) targets
 
 -- Smart ghost movement with coordinated trapping
 moveGhosts :: GameState -> GameState
@@ -137,6 +128,7 @@ moveGhosts state = state { ghostPositions = newPositions }
 
         newPositions = moveGhostsCoordinated oldPositions trapTargets [] 0
 
+        moveGhostsCoordinated :: [Position] -> [Position] -> [Position] -> Int -> [Position]
         moveGhostsCoordinated [] _ acc _ = reverse acc
         moveGhostsCoordinated (gPos:rest) targets acc ghostIndex =
             let occupiedPositions = acc ++ rest
