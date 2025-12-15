@@ -14,7 +14,7 @@ import GameExecution (executeAction, isValidPosition, applyAction)
 import System.Random
 import Control.Monad.State hiding (state)
 import qualified Control.Monad.State as ST
-import Data.List (maximumBy, sortBy)
+import Data.List (maximumBy)
 import Data.Ord (comparing)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -24,56 +24,49 @@ import Control.DeepSeq
 import GHC.Generics (Generic)
 import qualified Data.Vector as V
 
--- MCTS Node representing a state in the game tree
+-- MCTS tree node
 data MCTSNode = MCTSNode
-    { nodeState :: GameState
-    , nodeAction :: Maybe Action
+    { nodeState :: !GameState
+    , nodeAction :: !(Maybe Action)
     , nodeVisits :: !Int
     , nodeWins :: !Double
-    , nodeChildren :: Map Action MCTSNode
-    , nodeUntriedActions :: [Action]
+    , nodeChildren :: !(Map Action MCTSNode)
+    , nodeUntriedActions :: ![Action]
     } deriving (Show, Generic)
 
 instance NFData MCTSNode
 
--- MCTS Parameters
+-- MCTS hyperparameters
 data MCTSParams = MCTSParams
-    { mctsIterations :: Int
-    , mctsExploration :: Double
-    , mctsMaxDepth :: Int
+    { mctsIterations :: Int      -- Number of iterations per tree
+    , mctsExploration :: Double  -- UCB1 exploration constant (√2 ≈ 1.41)
+    , mctsMaxDepth :: Int        -- Maximum simulation depth
     } deriving (Show)
 
-defaultMCTSParams :: MCTSParams
-defaultMCTSParams = MCTSParams
-    { mctsIterations = 1000
-    , mctsExploration = 1.41  -- sqrt(2) - standard UCB1 value
-    , mctsMaxDepth = 200
-    }
-
--- Get all VALID actions for a state (not walls)
+-- Get valid actions for current state
 legalActions :: GameState -> [Action]
 legalActions gs = 
     let g = grid gs
         pos = pacmanPos gs
     in filter (\action -> isValidPosition g (applyAction pos action)) allActions
 
--- UCB1 formula for action selection
+-- UCB1 selection formula
 ucb1 :: Double -> Int -> Double -> Int -> Double
 ucb1 explorationConstant parentVisits nodeWins nodeVisits
-    | nodeVisits == 0 = 1.0e308  -- Infinite value for unvisited
+    | nodeVisits == 0 = 1.0e308  -- Prioritize unvisited nodes
     | parentVisits == 0 = 0.0
     | otherwise = 
         let exploitation = nodeWins / fromIntegral nodeVisits
             exploration = explorationConstant * sqrt (log (fromIntegral parentVisits) / fromIntegral nodeVisits)
         in exploitation + exploration
 
--- Select best child using UCB1
+-- Select child with highest UCB1 score
 selectChild :: Double -> MCTSNode -> MCTSNode
 selectChild explorationConstant node =
     let children = Map.elems (nodeChildren node)
-        parent_visits = nodeVisits node
+        parentVisits = nodeVisits node
         scores = map (\child -> 
-            (ucb1 explorationConstant parent_visits (nodeWins child) (nodeVisits child), child)) children
+            (ucb1 explorationConstant parentVisits (nodeWins child) (nodeVisits child), child)) children
     in snd $ maximumBy (comparing fst) scores
 
 -- Expand node by adding one untried action
@@ -82,7 +75,6 @@ expand node = do
     case nodeUntriedActions node of
         [] -> return node
         actions -> do
-            -- Randomly pick an untried action
             idx <- ST.state $ randomR (0, length actions - 1)
             let action = actions !! idx
                 rest = take idx actions ++ drop (idx + 1) actions
@@ -96,234 +88,157 @@ expand node = do
                     , nodeChildren = Map.empty
                     , nodeUntriedActions = legalActions newState
                     }
-                updatedNode = node 
-                    { nodeChildren = Map.insert action newNode (nodeChildren node)
-                    , nodeUntriedActions = rest
-                    }
-            return updatedNode
+            return $ node 
+                { nodeChildren = Map.insert action newNode (nodeChildren node)
+                , nodeUntriedActions = rest
+                }
 
--- Check if a position would be immediately dangerous (ghost adjacent after their move)
-isDangerousMove :: GameState -> Action -> Bool
-isDangerousMove gs action =
-    let newPos = applyAction (pacmanPos gs) action
-        g = grid gs
-        ghosts = ghostPositions gs
-        -- Simulate where each ghost COULD move
-        possibleGhostMoves = [applyAction ghost a | ghost <- ghosts, a <- allActions]
-        validGhostMoves = filter (isValidPosition g) possibleGhostMoves
-        -- Check if any ghost could reach our new position
-    in newPos `elem` validGhostMoves
-
--- HEAVILY improved simulation with extreme ghost avoidance
+-- Simulation phase with intelligent rollout policy
 simulate :: RandomGen g => GameState -> Int -> State g Double
 simulate initialState maxDepth = go initialState 0 0.0 []
     where
-        go gameState depth totalReward visitedPositions
+        go state depth totalReward visited
             | depth >= maxDepth = return totalReward
-            | isTerminal gameState = 
-                if pelletsRemaining gameState == 0
-                    then return (totalReward + 1000.0)  -- Huge bonus for winning (increased from 500)
-                    else return (totalReward - 500.0)  -- Huge penalty for dying
+            | isTerminal state = 
+                if pelletsRemaining state == 0
+                    then return (totalReward + 1000.0)  -- Won
+                    else return (totalReward - 1000.0)  -- Died - MUCH WORSE
             | otherwise = do
-                let validActions = legalActions gameState
+                let validActions = legalActions state
                 
                 if null validActions
-                    then return (totalReward - 200.0)  -- Trapped!
+                    then return (totalReward - 500.0)  -- Trapped
                     else do
-                        -- Filter out immediately dangerous moves
-                        let safeActions = filter (not . isDangerousMove gameState) validActions
-                        let actionsToUse = if null safeActions then validActions else safeActions
+                        -- Filter out immediately dangerous moves first
+                        let safeActions = filter (not . isImmediatelyDangerous state) validActions
+                            actionsToUse = if null safeActions then validActions else safeActions
                         
-                        -- 80% safe greedy, 20% random (prioritize survival)
+                        -- 80% greedy, 20% random for better ghost avoidance
                         r <- ST.state random
                         action <- if r < (0.8 :: Double)
-                            then return $ chooseSafeGreedyAction gameState actionsToUse visitedPositions
+                            then return $ greedyAction state actionsToUse visited
                             else do
                                 idx <- ST.state $ randomR (0, length actionsToUse - 1)
                                 return $ actionsToUse !! idx
                         
-                        let (newState, reward) = executeAction gameState action
+                        let (newState, reward) = executeAction state action
                             currentPos = pacmanPos newState
-                            currentGrid = grid newState
                             
-                        -- MUCH heavier penalties for dangerous situations
-                        let ghostPenalty = ghostProximityPenalty newState
-                            revisitPenalty = if currentPos `elem` take 5 visitedPositions
-                                            then -25.0  -- Increased from -8.0
-                                            else 0.0
-                            -- Extra penalty for immediate backtrack
-                            backtrackPenalty = if not (null visitedPositions) && currentPos == head visitedPositions
-                                              then -100.0
-                                              else 0.0
-                            -- HUGE penalty for going to empty spaces we've been to
-                            emptyRevisitPenalty = if (currentGrid V.! snd currentPos V.! fst currentPos) == Empty
-                                                    && currentPos `elem` take 10 visitedPositions
-                                                    then -150.0
-                                                    else 0.0
-                            -- Penalty for being in a corner or having few escape routes
-                            escapeRoutes = length $ filter (isValidPosition currentGrid) 
-                                                  [applyAction currentPos a | a <- allActions]
-                            trappedPenalty = case escapeRoutes of
-                                1 -> -30.0  -- Only one way out - very dangerous!
-                                2 -> -10.0  -- Two ways out - concerning
-                                _ -> 0.0
+                            -- MUCH stronger penalties
+                            ghostPenalty = ghostProximityPenalty newState
+                            revisitPenalty = if currentPos `elem` take 5 visited then -25.0 else 0.0
+                            
+                            adjustedReward = reward + ghostPenalty + revisitPenalty
+                            discountedReward = totalReward + adjustedReward * (0.95 ^ depth)
                         
-                        let adjustedReward = reward + ghostPenalty + revisitPenalty + backtrackPenalty + emptyRevisitPenalty + trappedPenalty
-                        let discountedReward = totalReward + adjustedReward * (0.95 ^ depth)
-                        
-                        go newState (depth + 1) discountedReward (currentPos : visitedPositions)
+                        go newState (depth + 1) discountedReward (currentPos : visited)
         
-        -- MUCH harsher ghost proximity penalties
+        -- Check if move puts us adjacent to ghost
+        isImmediatelyDangerous state action =
+            let newPos = applyAction (pacmanPos state) action
+                ghosts = ghostPositions state
+                manhattan (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2)
+            in any (\g -> manhattan newPos g <= 1) ghosts
+        
+        -- MUCH stronger ghost proximity penalties
         ghostProximityPenalty gs =
             let pos = pacmanPos gs
                 ghosts = ghostPositions gs
                 manhattan (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2)
                 distances = [manhattan pos g | g <- ghosts]
                 minDist = if null distances then 100 else minimum distances
-                -- Count how many ghosts are nearby (being surrounded is worse)
-                nearbyGhosts = length $ filter (<= 3) distances
-                surroundPenalty = fromIntegral nearbyGhosts * (-20.0)  -- Increased from -15
-                
-                -- Penalty based on average distance to all ghosts
-                avgDist = if null distances 
-                         then 100.0 
-                         else fromIntegral (sum distances) / fromIntegral (length distances)
-                avgDistPenalty = case avgDist of
-                    d | d <= 2.0 -> -80.0   -- Way too close on average
-                    d | d <= 3.0 -> -40.0   -- Too close
-                    d | d <= 4.0 -> -15.0   -- Concerning
-                    _ -> 0.0
-                    
             in case minDist of
-                0 -> -500.0  -- On ghost - should never happen but catastrophic
-                1 -> -250.0  -- Adjacent to ghost - extremely dangerous! (increased from -200)
-                2 -> -80.0   -- 2 steps away - very dangerous (increased from -60)
-                3 -> -30.0   -- 3 steps away - dangerous (increased from -20)
-                4 -> -10.0   -- 4 steps away - concerning (increased from -5)
-                5 -> -3.0    -- 5 steps away - still want more distance
+                0 -> -1000.0  -- On ghost
+                1 -> -500.0   -- Adjacent - CRITICAL
+                2 -> -150.0   -- 2 steps - very dangerous
+                3 -> -50.0    -- 3 steps - dangerous
+                4 -> -15.0    -- 4 steps - concerning
+                5 -> -5.0     -- 5 steps - slightly concerning
                 _ -> 0.0
-            + surroundPenalty + avgDistPenalty
         
-        -- Choose action with EXTREME ghost avoidance priority
-        chooseSafeGreedyAction gs actions recentPositions =
-            let pos = pacmanPos gs
-                g = grid gs
-                ghosts = ghostPositions gs
+        -- Greedy action selection during simulation - PRIORITIZE SAFETY + PROGRESS
+        greedyAction state actions visited =
+            let pos = pacmanPos state
+                g = grid state
+                ghosts = ghostPositions state
                 
                 scoreAction action =
                     let newPos = applyAction pos action
                         manhattan (x1, y1) (x2, y2) = fromIntegral $ abs (x1 - x2) + abs (y1 - y2)
                         
-                        -- Distance to nearest ghost (TOP PRIORITY)
+                        -- Ghost distance (HIGHEST PRIORITY)
                         ghostDistances = [manhattan newPos gh | gh <- ghosts]
                         minGhostDist = if null ghostDistances then 100.0 else minimum ghostDistances
-                        -- HEAVILY weight ghost avoidance with exponential penalty for proximity
                         ghostScore = case minGhostDist of
-                            d | d <= 1.0 -> -10000.0  -- NEVER move adjacent to ghost
-                            d | d <= 2.0 -> -1000.0   -- Very bad
-                            d | d <= 3.0 -> -200.0    -- Bad
-                            d | d <= 4.0 -> -50.0     -- Concerning
-                            d | d <= 5.0 -> d * 20.0  -- Still want to maintain distance
-                            d -> d * 50.0             -- Good - maximize distance
+                            d | d <= 1.0 -> -100000.0  -- Never go adjacent
+                            d | d <= 2.0 -> -10000.0   -- Very bad
+                            d | d <= 3.0 -> -1000.0    -- Bad
+                            d | d <= 4.0 -> d * 50.0   -- Maximize distance
+                            d -> d * 100.0             -- Good - far away
                         
-                        -- How many ghosts can reach this position next turn?
-                        threateningGhosts = length $ filter (\gh -> manhattan newPos gh <= 2.0) ghosts
-                        threatScore = fromIntegral threateningGhosts * (-500.0)
+                        -- Count ghosts that could reach us
+                        nearbyGhosts = length $ filter (<= 3.0) ghostDistances
+                        surroundScore = fromIntegral nearbyGhosts * (-500.0)
                         
-                        -- Additional penalty based on average distance to ALL ghosts
-                        avgGhostDist = if null ghostDistances 
-                                      then 100.0 
-                                      else sum ghostDistances / fromIntegral (length ghostDistances)
-                        avgDistScore = case avgGhostDist of
-                            d | d <= 3.0 -> -100.0  -- Surrounded!
-                            d | d <= 5.0 -> -30.0   -- Too close on average
-                            d -> d * 5.0            -- Reward being far from all ghosts
-                        
-                        -- Count escape routes from new position
-                        escapeRoutes = length $ filter (isValidPosition g) 
-                                              [applyAction newPos a | a <- allActions]
-                        escapeScore = case escapeRoutes of
-                            1 -> -300.0  -- Dead end - avoid!
-                            2 -> -50.0   -- Limited options
-                            3 -> 20.0    -- Decent
-                            _ -> 50.0    -- Good - many options
-                        
-                        -- Distance to nearest pellet (MUCH HIGHER PRIORITY NOW)
+                        -- Pellet distance (HIGH priority now)
                         pelletDist = nearestPelletDist g newPos
-                        pelletScore = negate $ pelletDist * 2.0  -- Increased from 0.3 to 2.0!
+                        pelletScore = negate pelletDist * 20.0  -- Increased from 5.0
                         
-                        -- Bonus for being on a pellet (MUCH BIGGER)
-                        -- But ONLY if there's actually a pellet there!
+                        -- Pellet bonus (HUGE)
                         onPelletBonus = if (g V.! snd newPos V.! fst newPos) == Pellet 
-                                       then 150.0 else 0.0  -- Increased from 100.0
+                                       then 500.0 else 0.0  -- Increased from 200.0
                         
-                        -- CRITICAL: Heavy penalty for moving to empty spaces we've visited
-                        -- This prevents going back to where pellets were already eaten
-                        emptyRevisitPenalty = if (g V.! snd newPos V.! fst newPos) == Empty 
-                                             && newPos `elem` take 10 recentPositions
-                                             then -250.0  -- Massive penalty for backtracking to empty spaces
-                                             else 0.0
+                        -- STRONG penalty for revisiting - especially recent positions
+                        revisitPenalty = case length $ filter (== newPos) visited of
+                            0 -> 0.0    -- New position - good!
+                            1 -> -200.0  -- Been here once
+                            2 -> -500.0  -- Been here twice
+                            _ -> -1000.0 -- Been here many times - avoid!
                         
-                        -- Penalize revisiting (stronger now to prevent backtracking)
-                        revisitPenalty = if newPos `elem` take 3 recentPositions
-                                        then -150.0  -- Much stronger penalty (was -30.0)
-                                        else 0.0
+                        -- MASSIVE penalty for going back to previous position (oscillation)
+                        oscillationPenalty = if not (null visited) && newPos == head visited
+                                            then -2000.0
+                                            else 0.0
                         
-                        -- Extra penalty for going back to exact previous position
-                        backtrackPenalty = if not (null recentPositions) && newPos == head recentPositions
-                                          then -300.0  -- Massive penalty for immediate backtrack
-                                          else 0.0
-                        
-                        -- NEW: Progress toward uncollected pellets
-                        -- Reward moving closer to the nearest pellet
+                        -- Progress bonus: are we getting closer to nearest pellet?
                         currentPelletDist = nearestPelletDist g pos
                         progressBonus = if pelletDist < currentPelletDist
-                                       then 40.0  -- Moving closer to pellet
+                                       then 100.0   -- Moving toward pellet
                                        else if pelletDist > currentPelletDist
-                                       then -40.0  -- Moving away from pellet
-                                       else -20.0  -- Standing still (no progress)
+                                       then -100.0  -- Moving away
+                                       else -50.0   -- No progress
                         
-                        -- NEW: Exploration bonus for moving to less-visited areas
-                        visitCount = length $ filter (== newPos) (take 20 recentPositions)
-                        explorationBonus = case visitCount of
-                            0 -> 30.0   -- Never been here
-                            1 -> 10.0   -- Been once
-                            2 -> -10.0  -- Been twice
-                            _ -> -50.0  -- Been many times - avoid!
-                        
-                    in ghostScore + threatScore + avgDistScore + escapeScore + pelletScore + onPelletBonus + revisitPenalty + backtrackPenalty + emptyRevisitPenalty
+                    in ghostScore + surroundScore + pelletScore + onPelletBonus + revisitPenalty + oscillationPenalty + progressBonus
                 
                 scoredActions = [(action, scoreAction action) | action <- actions]
             in fst $ maximumBy (comparing snd) scoredActions
         
         nearestPelletDist g pos =
             let rows = V.length g
+                cols = if rows > 0 then V.length (g V.! 0) else 0
                 pelletPositions = [(x, y) | y <- [0..rows-1], 
-                                            x <- [0..V.length (g V.! y)-1],
+                                            x <- [0..cols-1],
+                                            x < V.length (g V.! y),
                                             (g V.! y V.! x) == Pellet]
                 manhattan (x1, y1) (x2, y2) = fromIntegral $ abs (x1 - x2) + abs (y1 - y2)
             in if null pelletPositions 
                then 100.0 
                else minimum [manhattan pos p | p <- pelletPositions]
 
--- Backpropagate result through the tree
+-- Backpropagation: update nodes along path
 backpropagate :: Double -> [MCTSNode] -> [MCTSNode]
-backpropagate result path =
-    map (\node -> node 
-        { nodeVisits = nodeVisits node + 1
-        , nodeWins = nodeWins node + result
-        }) path
+backpropagate result = map (\node -> node 
+    { nodeVisits = nodeVisits node + 1
+    , nodeWins = nodeWins node + result
+    })
 
--- FIXED iteration to properly update the tree structure
+-- Single MCTS iteration
 mctsIteration :: RandomGen g => MCTSParams -> MCTSNode -> State g MCTSNode
 mctsIteration params rootNode = do
     (selectedNode, path) <- selectAndExpand params rootNode []
     result <- simulate (nodeState selectedNode) (mctsMaxDepth params)
     
-    -- Update nodes in path with new statistics
     let updatedPath = backpropagate result (selectedNode : path)
-    
-    -- Reconstruct tree from updated path
     return $ reconstructTree updatedPath
     where
         reconstructTree [] = rootNode
@@ -331,7 +246,7 @@ mctsIteration params rootNode = do
         reconstructTree (child:parent:rest) =
             let action = case nodeAction child of
                     Just a -> a
-                    Nothing -> error "Child node must have an action"
+                    Nothing -> error "Child must have action"
                 updatedParent = parent {
                     nodeChildren = Map.insert action child (nodeChildren parent)
                 }
@@ -356,7 +271,7 @@ mctsIteration params rootNode = do
                     actualChild = (nodeChildren node) Map.! action
                 selectAndExpand params actualChild (node : path)
 
--- Run MCTS for a given number of iterations
+-- Sequential MCTS: build tree with N iterations
 mcts :: RandomGen g => MCTSParams -> GameState -> State g MCTSNode
 mcts params initialState = do
     let rootNode = MCTSNode
@@ -374,23 +289,26 @@ mcts params initialState = do
             updatedNode <- mctsIteration params node
             go params updatedNode (n - 1)
 
--- Parallel MCTS using root parallelization
+-- Parallel MCTS: root parallelization
 mctsParallel :: Int -> MCTSParams -> GameState -> IO MCTSNode
 mctsParallel numThreads params initialState = do
-    let iterationsPerThread = mctsIterations params `div` numThreads
+    let iterationsPerThread = max 1 (mctsIterations params `div` numThreads)
         params' = params { mctsIterations = iterationsPerThread }
     
     seeds <- replicateM numThreads randomIO
     
+    -- Force parallel evaluation with rdeepseq
     let trees = parMap rdeepseq (\seed ->
-            evalState (mcts params' initialState) (mkStdGen seed)
+            force $ evalState (mcts params' initialState) (mkStdGen seed)
             ) seeds
     
-    return $ mergeTrees trees
+    -- Force evaluation of all trees before merging
+    let !forcedTrees = force trees
+    return $! mergeTrees forcedTrees
 
--- Merge multiple MCTS trees by combining statistics
+-- Merge multiple MCTS trees
 mergeTrees :: [MCTSNode] -> MCTSNode
-mergeTrees [] = error "Cannot merge empty list of trees"
+mergeTrees [] = error "Cannot merge empty list"
 mergeTrees (first:rest) = 
     let combinedChildren = foldl mergeChildMaps (nodeChildren first) (map nodeChildren rest)
         totalVisits = sum $ map nodeVisits (first:rest)
@@ -408,57 +326,82 @@ mergeTrees (first:rest) =
             , nodeChildren = Map.unionWith combineNodes (nodeChildren n1) (nodeChildren n2)
             }
 
--- IMPROVED action selection - heavily consider safety AND immediate danger
+-- Select best action from root node - SAFETY FIRST + NO OSCILLATION + ESCAPE ROUTES
 selectBestAction :: MCTSNode -> Action
 selectBestAction node =
     let children = Map.toList (nodeChildren node)
     in if null children
         then MoveUp  -- Fallback
         else
-            -- First, filter out immediately dangerous moves
+            -- First filter out moves that lead to immediate death
             let currentState = nodeState node
+                ghosts = ghostPositions currentState
+                recentPos = recentPositions currentState
+                g = grid currentState
                 
-                -- Check if an action leads to immediate death
-                isImmediatelyDangerous action = 
-                    case Map.lookup action (nodeChildren node) of
-                        Nothing -> False
-                        Just childNode -> 
-                            let childState = nodeState childNode
-                            in isTerminal childState && pelletsRemaining childState > 0
+                manhattan (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2)
                 
-                -- Also check if moving would put us adjacent to a ghost
-                isAdjacentToGhost action =
-                    let newPos = applyAction (pacmanPos currentState) action
-                        ghosts = ghostPositions currentState
-                        manhattan (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2)
-                    in any (\g -> manhattan newPos g <= 1) ghosts
+                -- Check if action leads to immediate death
+                isDeadlyAction (action, child) =
+                    let childState = nodeState child
+                        newPos = pacmanPos childState
+                    in isTerminal childState && pelletsRemaining childState > 0
+                       || any (\gh -> manhattan newPos gh <= 1) ghosts
                 
-                -- Filter out dangerous moves
-                safeChildren = filter (\(action, _) -> 
-                    not (isImmediatelyDangerous action) && 
-                    not (isAdjacentToGhost action)) children
+                -- Check if action leads to a trap (no safe escape routes)
+                isTrappingAction (action, child) =
+                    let childState = nodeState child
+                        newPos = pacmanPos childState
+                        -- Count safe escape routes from new position
+                        escapeActions = filter (\a -> isValidPosition g (applyAction newPos a)) allActions
+                        safeEscapes = filter (\a -> 
+                            let escapePos = applyAction newPos a
+                                escapeGhostDists = [fromIntegral $ manhattan escapePos gh | gh <- ghosts]
+                                minEscapeDist = if null escapeGhostDists then 100.0 else minimum escapeGhostDists
+                            in minEscapeDist > 2.0
+                            ) escapeActions
+                    in length safeEscapes == 0  -- No safe escapes = trap
                 
-                -- Use safe children if available, otherwise use all (last resort)
-                childrenToConsider = if null safeChildren then children else safeChildren
-            
-            in if null childrenToConsider
-                then MoveUp  -- Fallback
-                else
-                    -- Prioritize actions that are well-explored AND have good win rates
-                    let scoreChild (action, child) =
-                            let visits = nodeVisits child
-                                winRate = if visits > 0 
-                                          then nodeWins child / fromIntegral visits 
-                                          else -10000.0
-                                -- Need reasonable exploration (at least 5% of total iterations)
-                                explorationThreshold = fromIntegral (nodeVisits node) * 0.05
-                                explorationPenalty = if fromIntegral visits < explorationThreshold
-                                                    then -1000.0
-                                                    else 0.0
-                                -- Heavily weight win rate for safety
-                                score = winRate * 100.0 + fromIntegral visits + explorationPenalty
-                            in (score, action)
+                -- Check if action causes oscillation (going back to recent position)
+                isOscillation (action, child) =
+                    let newPos = pacmanPos (nodeState child)
+                    in newPos `elem` take 3 recentPos
+                
+                -- Filter progressively: deadly -> trapping -> oscillating
+                safeChildren = filter (not . isDeadlyAction) children
+                nonTrapping = filter (not . isTrappingAction) safeChildren
+                nonOscillating = filter (not . isOscillation) nonTrapping
+                
+                -- Use best available set
+                childrenToConsider = if not (null nonOscillating)
+                                    then nonOscillating
+                                    else if not (null nonTrapping)
+                                    then nonTrapping
+                                    else if not (null safeChildren)
+                                    then safeChildren
+                                    else children
+                
+                scored = map (\(action, child) ->
+                    let visits = nodeVisits child
+                        winRate = if visits > 0 
+                                  then nodeWins child / fromIntegral visits 
+                                  else -10000.0
+                        -- Require decent exploration (at least 3% of total)
+                        explorationThreshold = fromIntegral (nodeVisits node) * 0.03
+                        explorationPenalty = if fromIntegral visits < explorationThreshold
+                                            then -5000.0
+                                            else 0.0
                         
-                        scored = map scoreChild childrenToConsider
-                        bestChild = maximumBy (comparing fst) scored
-                    in snd bestChild
+                        -- Additional penalty for actions that lead to positions we've been recently
+                        childPos = pacmanPos (nodeState child)
+                        recentPosPenalty = if childPos `elem` take 5 recentPos
+                                          then -2000.0
+                                          else 0.0
+                        
+                        -- Heavily weight win rate for safety
+                        score = winRate * 1000.0 + fromIntegral visits + explorationPenalty + recentPosPenalty
+                    in (score, action)
+                    ) childrenToConsider
+            in if null scored
+                then MoveUp
+                else snd $ maximumBy (comparing fst) scored
